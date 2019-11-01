@@ -1,0 +1,454 @@
+---
+title: "Statistical_Data_Challenge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(foreign)
+library(boot)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(data.table)
+library(ggpubr)
+library(scales)
+library(ivregEX)
+library(AER)
+library(tidyverse)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+STATA_1 <- data.frame(read.dta("~/propulsion_academy/thibault-mattera-folder-master/Module_2_Statistics/Statistical_Data_Challenge/maketable1.dta", convert.factors=FALSE))
+STATA_2 <- data.frame(read.dta("~/propulsion_academy/thibault-mattera-folder-master/Module_2_Statistics/Statistical_Data_Challenge/maketable2.dta", convert.factors=FALSE))
+coups <- data.frame(read.delim("~/propulsion_academy/thibault-mattera-folder-master/Module_2_Statistics/Statistical_Data_Challenge/powell_thyne_coups_final.txt"))
+New_statistics <- read.csv("~/propulsion_academy/thibault-mattera-folder-master/Module_2_Statistics/Statistical_Data_Challenge/cleaned_colonies3.csv")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+summary(STATA_1)
+```
+
+#### Understand the data
+
+We will focus mainly at STATA_1: 
+- shortnam = Abbreviated name used for each country (trigram)
+- logpgp95 = Log GDP per capita (PPP) in 1995
+- avexpr = Average protection against expropriation risk 1985-1995
+- extmort4 = Main mortality rate estimate
+
+```{r}
+# Clean the data (remove rows with NA's values on specific columns)
+df_STATA1 <- STATA_1 %>% select(shortnam,logpgp95,avexpr,extmort4,logem4)
+df_STATA1 <- df_STATA1[!is.na(df_STATA1$logpgp95),]
+df_STATA2 <- STATA_2 %>% select(shortnam,logpgp95,avexpr)
+df_STATA2 <- df_STATA2[!is.na(df_STATA2$logpgp95),]
+```
+
+```{r}
+summary(df_STATA1)
+```
+
+
+```{r}
+summary(df_STATA2)
+```
+
+# Part 1: Replication
+
+
+## Data Analysis
+
+### Plot log_GDP distribution 
+
+```{r}
+hist(df_STATA1$logpgp95)
+```
+
+
+```{r}
+# count the number of country (whole world)
+nrow(df_STATA1)
+```
+
+### Compute the mean and standard deviation of log GDP for the whole world
+
+
+```{r}
+# Mean of Log GDP for the whole world:
+cat('Mean of Log GDP for the whole world:\n')
+cat(mean(df_STATA1$logpgp95),'\n')
+cat('Standard deviation of GDP for the whole world:\n')
+cat(sd(df_STATA1$logpgp95))
+```
+
+```{r}
+# Mean of Log GDP for the whole world:
+cat('Mean of Log GDP for the whole world:\n')
+cat(mean(df_STATA2$logpgp95),'\n')
+cat('Standard deviation of GDP for the whole world:\n')
+cat(sd(df_STATA2$logpgp95))
+```
+
+
+### Check the normality of the data: bootstrapping
+
+#### Bootstrapping on the mean of the logGDP distribution
+
+```{r}
+### create function for compute the satistic in the function (here: the mean)
+fc <- function(data, index){
+	mean_x <- mean(df_STATA1$logpgp95[index])
+	return(mean_x)
+}
+```
+
+
+```{r}
+boot_STATA1 <- boot(data=df_STATA1, statistic=fc, R=10000)
+boot_STATA1
+```
+
+
+#### Bootstrapping on the mean of the beta value from the result of linear regression: log GDP with Av. protection against expropriation risk
+
+```{r}
+vec=numeric(1000)
+for (i in 1:1000){
+   #we generate a lot of estimate for beta from random sub-sample and we get a vector with all these.
+   index_beta=sample.int(length(df_STATA1$shortnam), 10)
+   vec[i]=(summary(lm(df_STATA1$logpgp95[index_beta] ~ df_STATA1$avexpr[index_beta]))$coefficient[2])
+}
+hist(vec)
+mean(vec)
+quantile(vec,0.025)
+quantile(vec,0.975)
+```
+
+
+# Approach: Instrumental regression
+
+#### get only the excolony countries
+
+```{r}
+STATA_1_excolony <- STATA_1[STATA_1[,'excolony']==1,]
+```
+
+## 1 - Linear regression: logGDP as a function of avexpr (expropriation risk)
+
+```{r}
+model_logpgp95_avexpr <- lm(STATA_1_excolony$logpgp95~STATA_1_excolony$avexpr)
+summary(model_logpgp95_avexpr)
+```
+
+```{r, echo=FALSE}
+# plot PIQ (y) vs Brain size (x1) and add the linear regression line
+logpgp95_avexpr <- STATA_1_excolony %>% select(avexpr,logpgp95)
+
+plot(logpgp95_avexpr, col='blue', pch=20, cex=1, main="Relationship between GDP and Average protection against expropriation risk",
+	xlab="Average protection against expropriation risk", ylab="log GDP per capita (1995)")
+text(logpgp95_avexpr$avexpr,logpgp95_avexpr$logpgp95,labels=logpgp95_avexpr$shortnam)
+abline(lm(logpgp95_avexpr$logpgp95 ~ logpgp95_avexpr$avexpr))
+```
+
+```{r, echo=FALSE}
+# plot PIQ (y) vs Brain size (x1) and add the linear regression line
+logpgp95_avexpr <- STATA_1_excolony %>% select(avexpr,logpgp95,shortnam)
+
+plot(logpgp95_avexpr$avexpr,logpgp95_avexpr$logpgp95, cex=0.001,xlim=c(3.5,11), ylim=c(4,10.5), main="GDP vs Protection against expropriation risk",
+	xlab="Average protection against expropriation risk", ylab="log GDP per capita (1995)")
+text(logpgp95_avexpr$avexpr,logpgp95_avexpr$logpgp95,labels=logpgp95_avexpr$shortnam,cex=0.75)
+abline(lm(logpgp95_avexpr$logpgp95 ~ logpgp95_avexpr$avexpr),col='blue')
+```
+
+
+```{r, echo=FALSE}
+# plot residual
+plot(model_logpgp95_avexpr)
+```
+
+Residual:
+difference between the actual value and the predicted values
+
+Fitted Values:
+predicted values
+
+Normal Q-Q plot:
+check if the residual follows a normal distribution
+
+
+
+#### Get a sense of the magnitude of the effect of institutions on performance
+
+```{r}
+# Let's compare 2 countries: BRASIL and OUGANDA
+(STATA_1_excolony$avexpr[STATA_1_excolony$shortnam=="BRA"]- STATA_1_excolony$avexpr[STATA_1_excolony$shortnam=="UGA"])*0.531
+```
+
+
+```{r}
+# Let's compare 2 countries: CHILE and NIGERIA
+(STATA_1_excolony$avexpr[STATA_1_excolony$shortnam=="CHL"]-STATA_1_excolony$avexpr[STATA_1_excolony$shortnam=="NGA"])*0.52
+```
+
+```{r}
+# Comparing with the values of the study
+exp((7.8-5.6)*0.52)-1
+```
+
+
+#### 2: DO a linear regression between X (the expropriation risk) as a function of the Z variable (settler mortality).
+
+
+```{r}
+model_avexpr_logem4<- lm(STATA_1_excolony$avexpr~STATA_1_excolony$logem4)
+summary(model_avexpr_logem4)
+```
+
+
+
+```{r, echo=FALSE}
+# plot logGDP (y) vs Expropriation risk (x1) and add the linear regression line
+avexpr_logem4 <- STATA_1_excolony %>% select(logem4, avexpr, shortnam)
+#logpgp95_avexpr <-
+
+plot(avexpr_logem4$logem4, avexpr_logem4$avexpr,cex=0.001, main="Protection again expropriation risk vs Settler mortality",
+	xlab="settler mortality", ylab="Average protection against expropriation risk")
+text(avexpr_logem4$logem4,avexpr_logem4$avexpr,labels=avexpr_logem4$shortnam,cex=0.75)
+abline(lm(avexpr_logem4$avexpr ~ avexpr_logem4$logem4),col='red')
+```
+
+```{r, echo=FALSE}
+# plot PIQ (y) vs Brain size (x1) and add the linear regression line
+plot(model_avexpr_logem4)
+```
+
+
+### 3: instrumental regression
+
+
+
+
+
+# Part 2: Reproducibility
+
+## new response (y): log gdp 2017
+
+### take new institution: number of coups
+
+```{r}
+summary(coups)
+```
+
+
+```{r}
+coup_countries <- data.frame(table(coups$country))
+```
+
+
+```{r}
+# Add excolony countries with 0 coup
+coup_countries <- coup_countries %>% add_row(Var1 = "Autrialia", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Bahamas", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Cote d'Ivoire", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Guyana", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Hong Kong", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "India", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Jamaica", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Mexico", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "New Zealand", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Nicaragua", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Singapore", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "South Africa", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Sri Lanka", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "United States", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Vietnam", Freq = 0)
+coup_countries <- coup_countries %>% add_row(Var1 = "Zaire", Freq = 0)
+```
+
+
+```{r}
+summary(New_statistics)
+```
+
+
+```{r}
+New_statistics <- New_statistics[!is.na(New_statistics$INDEX),]
+```
+```{r}
+summary(New_statistics)
+```
+
+
+```{r}
+# Delete the rows with no value in GDP_ln_2017 and country names
+New_statistics <- New_statistics[!is.na(New_statistics$GDP_ln_2017),]
+New_statistics <- New_statistics[!is.na(New_statistics$Country_Names),]
+New_statistics <- New_statistics[!is.na(New_statistics$logem4),]
+```
+
+
+```{r}
+#New_statistics$logGDP2018 <- log(as.numeric(New_statistics$GDP_2018_Nominal))
+```
+
+
+
+```{r}
+# select only the excolony countries
+New_statistics_excolony <- New_statistics[New_statistics[,'excolony']==1,]
+```
+```{r}
+New_statistics_excolony <- New_statistics_excolony[!is.na(New_statistics_excolony$Country_Names),]
+```
+
+
+```{r}
+New_statistics_excolony <-  New_statistics_excolony  %>% select(Country_Names,avexpr,logem4,GDP_ln_2017)
+```
+
+
+```{r}
+nrow(New_statistics_excolony)
+```
+
+
+#### merge the coups and the new statistics in a new data frame
+
+```{r}
+# compare the number of rows
+n1 <- nrow(New_statistics_excolony) 
+n2 <-nrow(coup_countries) 
+```
+
+```{r}
+# building a new dataframe with country names, log gdp 2018 and coup_countries
+# create empty dataframe
+#new_df <- data.frame(country=character(),
+#                 nb_coups=integer(),
+#                 loggdp2018=integer(),
+#                 stringsAsFactors=FALSE)
+country <- c()
+logdp2017 <- c()
+nbcoup <- c()
+mortality <- c()
+
+for(i in 1:n2)
+  {
+  for(j in 1:n1)
+    {
+    if (coup_countries[i,'Var1']==New_statistics_excolony[j,'Country_Names'])
+      {
+      country <- c(country,as.character(New_statistics_excolony[j,'Country_Names']))
+      logdp2017 <- c(logdp2017, New_statistics_excolony[j,'GDP_ln_2017'])
+      nbcoup <- c(nbcoup,coup_countries[i,'Freq'])
+      mortality <- c(mortality,New_statistics_excolony[j,'logem4'])
+      
+      #cat('found')
+    }
+  }
+}
+``` 
+
+
+```{r}
+# compare the number of rows
+length(mortality)
+```
+
+
+```{r}
+# put everything in a dataframe
+df2 <- data.frame(country,nbcoup,mortality,logdp2017)
+```
+
+```{r}
+# compare the number of rows
+df2
+```
+
+### create new column log(nb of coup)
+
+```{r}
+df2$lognbcoup <- log(as.numeric(1+df2$nbcoup))
+```
+
+
+```{r}
+length(df2$lognbcoup)
+```
+```{r}
+# distribution of nbcoup
+hist(df2$lognbcoup)
+```
+
+#### Linear regression (Y with X): logGDP2017 as a function of number of coups
+
+```{r}
+model_loggdp2017_lognbcoup <- lm(df2$logdp2017~df2$lognbcoup)
+summary(model_loggdp2017_lognbcoup)
+```
+
+```{r, echo=FALSE}
+# plot logGDP (y) vs Expropriation risk (x1) and add the linear regression line
+loggdp2017_coups <- df2 %>% select(lognbcoup, logdp2017)
+#logpgp95_avexpr <-
+
+plot(loggdp2017_coups, col='green3', pch=20, cex=2, main="Log GDP 2017 (y variable) vs LOG number of coups (x variable)",
+	xlab="log of number of coups (from 1950 until now)", ylab="log GDP 2017")
+abline(lm(loggdp2017_coups$logdp2017 ~ loggdp2017_coups$lognbcoup))
+```
+
+
+```{r, echo=FALSE}
+# plot PIQ (y) vs Brain size (x1) and add the linear regression line
+plot(model_loggdp2017_lognbcoup)
+```
+
+#### Linear regression (X with Z): number of coups with settler mortality
+
+
+```{r}
+model_lognbcoup_mortality <- lm(df2$lognbcoup~df2$mortality)
+summary(model_lognbcoup_mortality)
+```
+
+
+```{r, echo=FALSE}
+# plot logGDP (y) vs Expropriation risk (x1) and add the linear regression line
+lognbcoup_mortality <- df2 %>% select(mortality,lognbcoup)
+#logpgp95_avexpr <-
+
+plot(lognbcoup_mortality, col='red', pch=20, cex=2, main="Relationship between Number of Coups and Settler mortality",
+	xlab="settler mortality", ylab="log Nb of coups")
+abline(lm(lognbcoup_mortality$lognbcoup ~ lognbcoup_mortality$mortality))
+```
+
+```{r, echo=FALSE}
+iv_=ivreg(New_statistics$GINI_Index ~ New_statistics$avexpr | New_statistics$logem4 , data = New_statistics)
+summary(iv_)
+```
+
+
+
+```{r, echo=FALSE}
+# plot logGDP (y) vs Expropriation risk (x1) and add the linear regression line
+lognbcoup_mortality <- df2 %>% select(mortality,lognbcoup)
+#logpgp95_avexpr <-
+
+plot(lognbcoup_mortality, col='red', pch=20, cex=2, main="Relationship between Number of Coups and Settler mortality",
+	xlab="settler mortality", ylab="log Nb of coups")
+abline(lm(lognbcoup_mortality$lognbcoup ~ lognbcoup_mortality$mortality))
+```
+
+
